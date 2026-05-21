@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Node
+node_modules/
+.pnpm-store/
+
+# Build output
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Data
+data/
+*.csv
+*.parquet
+*.feather
+
+# Docker volumes
+pgdata/
+redisdata/
+
+# Logs
+logs/
+*.log
+
+# Service PID files
+.backend.pid
+.frontend.pid
+
+# Alembic
+alembic/versions/*.pyc
