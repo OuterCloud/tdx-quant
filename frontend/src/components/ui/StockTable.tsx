@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-function Tip({ text }: { text: string }) {
+export function Tip({ text }: { text: string }) {
   const [show, setShow] = useState(false);
   const triggerRef = useRef<HTMLSpanElement>(null);
   const [style, setStyle] = useState<React.CSSProperties>({});

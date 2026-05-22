@@ -22,7 +22,7 @@ const PRESET_STRATEGIES: Record<string, { description: string; config: Record<st
     },
   },
   "缩量回调": {
-    description: "趋势向上但短期缩量回调",
+    description: "趋势向上但短期缩量回调，适合低吸布局",
     config: {
       layer1: { exclude_st: true, exclude_suspended: true, exclude_bse: true, exclude_star: true },
       layer2: { require_ma_aligned: true, ma_periods: [5, 10, 20, 60], require_trend_strong: false, require_di_bullish: true, min_adx: 0 },
@@ -31,7 +31,7 @@ const PRESET_STRATEGIES: Record<string, { description: string; config: Record<st
     },
   },
   "底部反转": {
-    description: "超跌 + KDJ/MACD底部金叉",
+    description: "超跌 + KDJ/MACD底部金叉，适合抄底",
     config: {
       layer1: { exclude_st: true, exclude_suspended: true, exclude_bse: true, exclude_star: true },
       layer2: { require_ma_aligned: false, ma_periods: [5, 10, 20, 60], require_trend_strong: false, require_di_bullish: false, min_adx: 0 },
@@ -46,6 +46,51 @@ const PRESET_STRATEGIES: Record<string, { description: string; config: Record<st
       layer2: { require_ma_aligned: false, require_ma_converge: true, ma_converge_pct: 3.0, ma_periods: [5, 10, 20, 60], require_trend_strong: false, require_di_bullish: false, min_adx: 0 },
       layer3: { min_amount: 1.5e8, min_volume_ratio: 0, require_macd_golden_cross: false, require_macd_positive: false, require_kdj_golden_cross: false, rsi_min: 35, rsi_max: 65 },
       layer4: { max_drawdown_limit: 12, max_consecutive_down: -4, max_bias: 5, min_bias: -5, wr_overbought: 999, boll_upper_limit: 0.75 },
+    },
+  },
+  "趋势加速": {
+    description: "均线多头 + MACD动能为正 + DI看多，确认趋势加速",
+    config: {
+      layer1: { exclude_st: true, exclude_suspended: true, exclude_bse: true, exclude_star: true },
+      layer2: { require_ma_aligned: true, ma_periods: [5, 10, 20, 60], require_trend_strong: false, require_di_bullish: true, min_adx: 20 },
+      layer3: { min_amount: 1.5e8, min_volume_ratio: 0.8, require_macd_golden_cross: false, require_macd_positive: true, require_kdj_golden_cross: false, rsi_min: 45, rsi_max: 75 },
+      layer4: { max_drawdown_limit: 12, max_consecutive_down: -3, max_bias: 12, min_bias: -8, wr_overbought: 999, boll_upper_limit: 0.9 },
+    },
+  },
+  "低位蓄力": {
+    description: "BOLL下半区 + MACD翻正 + RSI偏低，底部企稳蓄势",
+    config: {
+      layer1: { exclude_st: true, exclude_suspended: true, exclude_bse: true, exclude_star: true },
+      layer2: { require_ma_aligned: false, ma_periods: [5, 10, 20, 60], require_trend_strong: false, require_di_bullish: false, min_adx: 0 },
+      layer3: { min_amount: 1e8, min_volume_ratio: 0, require_macd_golden_cross: false, require_macd_positive: true, require_kdj_golden_cross: false, rsi_min: 30, rsi_max: 50 },
+      layer4: { max_drawdown_limit: 15, max_consecutive_down: -5, max_bias: 3, min_bias: -12, wr_overbought: 999, boll_upper_limit: 0.5 },
+    },
+  },
+  "强势整理": {
+    description: "均线多头 + 均线粘合收窄，强势股横盘即将二次启动",
+    config: {
+      layer1: { exclude_st: true, exclude_suspended: true, exclude_bse: true, exclude_star: true },
+      layer2: { require_ma_aligned: true, require_ma_converge: true, ma_converge_pct: 5.0, ma_periods: [5, 10, 20, 60], require_trend_strong: false, require_di_bullish: false, min_adx: 0 },
+      layer3: { min_amount: 1.5e8, min_volume_ratio: 0, require_macd_golden_cross: false, require_macd_positive: false, require_kdj_golden_cross: false, rsi_min: 40, rsi_max: 65 },
+      layer4: { max_drawdown_limit: 10, max_consecutive_down: -3, max_bias: 6, min_bias: -6, wr_overbought: 999, boll_upper_limit: 0.8 },
+    },
+  },
+  "动能恢复": {
+    description: "DI看多 + MACD由负转正 + RSI温和回升",
+    config: {
+      layer1: { exclude_st: true, exclude_suspended: true, exclude_bse: true, exclude_star: true },
+      layer2: { require_ma_aligned: false, ma_periods: [5, 10, 20, 60], require_trend_strong: false, require_di_bullish: true, min_adx: 0 },
+      layer3: { min_amount: 1e8, min_volume_ratio: 0, require_macd_golden_cross: false, require_macd_positive: true, require_kdj_golden_cross: false, rsi_min: 35, rsi_max: 55 },
+      layer4: { max_drawdown_limit: 18, max_consecutive_down: -5, max_bias: 5, min_bias: -10, wr_overbought: 999, boll_upper_limit: 0.7 },
+    },
+  },
+  "量价齐升": {
+    description: "温和放量 + MACD为正 + 乖离率适中，量价配合健康上行",
+    config: {
+      layer1: { exclude_st: true, exclude_suspended: true, exclude_bse: true, exclude_star: true },
+      layer2: { require_ma_aligned: false, ma_periods: [5, 10, 20, 60], require_trend_strong: false, require_di_bullish: false, min_adx: 0 },
+      layer3: { min_amount: 1.5e8, min_volume_ratio: 1.0, max_volume_ratio: 3.0, require_macd_golden_cross: false, require_macd_positive: true, require_kdj_golden_cross: false, rsi_min: 40, rsi_max: 70 },
+      layer4: { max_drawdown_limit: 12, max_consecutive_down: -3, max_bias: 8, min_bias: -8, wr_overbought: 999, boll_upper_limit: 0.8 },
     },
   },
 };
@@ -360,7 +405,7 @@ export default function Backtest() {
         {/* Strategy Selection */}
         <div className="space-y-2">
           <label className="text-sm font-medium">策略模板</label>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
             {Object.entries(PRESET_STRATEGIES).map(([name, preset]) => (
               <button
                 key={name}

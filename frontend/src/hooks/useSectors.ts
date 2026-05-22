@@ -20,6 +20,22 @@ export interface SectorSyncStatus {
   is_syncing: boolean;
 }
 
+export interface SectorMemberItem {
+  stock_code: string;
+  stock_name: string;
+  close: number | null;
+  pct_change: number | null;
+  amount: number | null;
+  volume_ratio: number | null;
+  ma_aligned: boolean;
+}
+
+export interface SectorMembersResponse {
+  sector: SectorItem;
+  total: number;
+  items: SectorMemberItem[];
+}
+
 export function useSectors() {
   return useQuery<SectorItem[]>({
     queryKey: ["sectors"],
@@ -51,5 +67,30 @@ export function useSectorSync() {
       qc.invalidateQueries({ queryKey: ["sector-sync-status"] });
       qc.invalidateQueries({ queryKey: ["sectors"] });
     },
+  });
+}
+
+export interface SectorMembersParams {
+  sectorId: number | null;
+  page: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+  maAlignedOnly?: boolean;
+}
+
+export function useSectorMembers({ sectorId, page, sortBy = "amount", sortOrder = "desc", maAlignedOnly = false }: SectorMembersParams) {
+  return useQuery<SectorMembersResponse>({
+    queryKey: ["sector-members", sectorId, page, sortBy, sortOrder, maAlignedOnly],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        page: String(page),
+        size: "30",
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      });
+      if (maAlignedOnly) params.set("ma_aligned_only", "true");
+      return fetchJson(`/api/sectors/${sectorId}/members?${params}`);
+    },
+    enabled: sectorId !== null,
   });
 }

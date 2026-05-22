@@ -4,6 +4,7 @@ import { NavLink, Outlet } from "react-router";
 const navItems = [
   { path: "/", label: "市场总览", icon: "📊" },
   { path: "/stocks", label: "股票数据", icon: "📈" },
+  { path: "/sectors", label: "板块数据", icon: "🏷️" },
   { path: "/screening", label: "选股策略", icon: "🔍" },
   { path: "/backtest", label: "回测分析", icon: "📉" },
   { path: "/settings", label: "系统设置", icon: "⚙️" },
