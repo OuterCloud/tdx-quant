@@ -19,6 +19,7 @@ from app.core.logging import publish_log
 from app.core.redis import get_redis
 from app.models.data_task import DataTask
 from app.models.sector import Sector, StockSector
+from app.models.stock import Stock
 
 API_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 PAGE_SIZE = 1000
@@ -146,35 +147,50 @@ async def run_sector_sync(task_id: str):
         # Write to database (full replace in transaction)
         await publish_log("[sector_sync:progress] 写入数据库...", "INFO")
         async with async_session() as session:
+            # Pre-load all existing stock codes to filter invalid foreign keys
+            existing_stocks_result = await session.execute(select(Stock.code))
+            valid_stock_codes = set(existing_stocks_result.scalars().all())
+
             # Clear existing stock_sectors
             await session.execute(delete(StockSector))
 
             # Upsert sectors and insert associations
+            skipped_stocks = 0
             for board_code, board_name in boards.items():
                 stock_codes = members.get(board_code, set())
+                # Only keep stocks that exist in our stocks table
+                valid_members = stock_codes & valid_stock_codes
+                skipped_stocks += len(stock_codes) - len(valid_members)
+
                 existing = await session.execute(
                     select(Sector).where(Sector.code == board_code)
                 )
                 sector = existing.scalar_one_or_none()
                 if sector:
                     sector.name = board_name
-                    sector.stock_count = len(stock_codes)
+                    sector.stock_count = len(valid_members)
                     sector.updated_at = datetime.now()
                 else:
                     sector = Sector(
                         code=board_code,
                         name=board_name,
                         board_type="concept",
-                        stock_count=len(stock_codes),
+                        stock_count=len(valid_members),
                     )
                     session.add(sector)
                     await session.flush()
 
-                # Insert stock-sector associations
-                for stock_code in stock_codes:
+                # Insert stock-sector associations (only valid ones)
+                for stock_code in valid_members:
                     session.add(StockSector(stock_code=stock_code, sector_id=sector.id))
 
             await session.commit()
+
+            if skipped_stocks > 0:
+                await publish_log(
+                    f"[sector_sync:progress] 跳过 {skipped_stocks} 条无效关联（股票不在本地库中）",
+                    "INFO",
+                )
 
         # Update Redis cache
         await publish_log("[sector_sync:progress] 更新缓存...", "INFO")
@@ -200,9 +216,9 @@ async def run_sector_sync(task_id: str):
             await redis.set("sectors:list", json.dumps(sectors_list_cache, ensure_ascii=False))
             await redis.set("sectors:synced_at", datetime.now().isoformat())
 
-            # Build member sets per sector
+            # Build member sets per sector (only valid stocks)
             for s in all_sectors:
-                stock_codes = members.get(s.code, set())
+                stock_codes = members.get(s.code, set()) & valid_stock_codes
                 if stock_codes:
                     key = f"sectors:members:{s.id}"
                     await redis.delete(key)

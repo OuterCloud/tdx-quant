@@ -14,8 +14,13 @@ export function AppLayout() {
     <div className="flex h-screen">
       <aside className="w-60 border-r border-border bg-muted/50 flex flex-col">
         <div className="p-4 border-b border-border">
-          <h1 className="text-lg font-bold">TDX量化</h1>
-          <p className="text-xs text-muted-foreground">A股量化选股系统</p>
+          <h1 className="text-lg font-bold">
+            TDX{" "}
+            <span className="text-sm font-normal text-muted-foreground">
+              - 他都行
+            </span>
+          </h1>
+          <p className="text-xs text-muted-foreground">量化选股系统</p>
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {navItems.map((item) => (
