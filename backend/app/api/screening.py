@@ -134,23 +134,33 @@ async def get_results(
     screen_date: str | None = Query(None, description="Date in YYYY-MM-DD format"),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
+    search: str | None = Query(None, description="Search by stock code or name"),
 ) -> dict:
     target_date = date.fromisoformat(screen_date) if screen_date else date.today()
 
     redis: Redis = get_redis()
     try:
         async with async_session() as session:
-            from sqlalchemy import func
+            from sqlalchemy import func, or_
+
+            base_filter = [ScreeningResult.screen_date == target_date]
+            if search:
+                base_filter.append(
+                    or_(
+                        ScreeningResult.stock_code.contains(search),
+                        ScreeningResult.stock_name.contains(search),
+                    )
+                )
 
             total = await session.scalar(
                 select(func.count())
                 .select_from(ScreeningResult)
-                .where(ScreeningResult.screen_date == target_date)
+                .where(*base_filter)
             )
 
             result = await session.execute(
                 select(ScreeningResult)
-                .where(ScreeningResult.screen_date == target_date)
+                .where(*base_filter)
                 .order_by(ScreeningResult.score.desc())
                 .offset((page - 1) * size)
                 .limit(size)

@@ -1,5 +1,6 @@
 import sys
 
+import redis as sync_redis
 from loguru import logger
 from redis.asyncio import Redis
 
@@ -26,3 +27,13 @@ async def publish_log(message: str, level: str = "INFO"):
         await redis.publish(LOG_CHANNEL, f"[{level}] {message}")
     finally:
         await redis.aclose()
+
+
+def publish_log_sync(message: str, level: str = "INFO"):
+    """Synchronous version for use in threads (e.g. backtest engine)."""
+    try:
+        r = sync_redis.from_url(settings.REDIS_URL)
+        r.publish(LOG_CHANNEL, f"[{level}] {message}")
+        r.close()
+    except Exception:
+        pass

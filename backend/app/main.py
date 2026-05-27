@@ -28,7 +28,9 @@ async def lifespan(app: FastAPI):
         result = await session.execute(
             update(DataTask)
             .where(DataTask.status == "running")
-            .values(status="failed", message="Interrupted (server restart)", finished_at=datetime.now())
+            .values(
+                status="failed", message="Interrupted (server restart)", finished_at=datetime.now()
+            )
         )
         if result.rowcount:
             logger.info(f"Cleaned up {result.rowcount} stale running task(s)")
@@ -42,7 +44,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="tdx-quant",
-    description="通达信量化选股系统",
+    description="他都行量化选股系统",
     version="0.1.0",
     lifespan=lifespan,
 )

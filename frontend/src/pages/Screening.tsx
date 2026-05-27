@@ -211,10 +211,10 @@ function StepIndicator({
 
 function ScreeningHelp() {
   const [open, setOpen] = useState(false);
-  const timeout = useRef<ReturnType<typeof setTimeout>>();
+  const timeout = useRef<ReturnType<typeof setTimeout>>(null);
 
   const show = () => {
-    clearTimeout(timeout.current);
+    if (timeout.current) clearTimeout(timeout.current);
     setOpen(true);
   };
   const hide = () => {
@@ -906,7 +906,7 @@ function ShareDialog({
 
             {/* Footer */}
             <div className="text-center text-[10px] text-gray-400 pt-2 border-t border-gray-100">
-              由 TDX量化选股系统 自动生成 | 仅供参考，不构成投资建议
+              由 TDX 量化选股系统 自动生成 | 仅供参考，不构成投资建议
             </div>
           </div>
         </div>
@@ -936,6 +936,9 @@ function ShareDialog({
 export default function Screening() {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterMaAligned, setFilterMaAligned] = useState(false);
+  const [filterCross, setFilterCross] = useState<"" | "M" | "K" | "MK">("");
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null);
 
   // Custom strategies
@@ -963,13 +966,26 @@ export default function Screening() {
     queryFn: () => fetchJson("/api/screening/presets"),
   });
 
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const { data: results } = useQuery<{
     total: number;
     screen_date: string;
     items: ScreeningResultItem[];
   }>({
-    queryKey: ["screening-results", page],
-    queryFn: () => fetchJson(`/api/screening/results?page=${page}&size=30`),
+    queryKey: ["screening-results", page, debouncedSearch],
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(page), size: "30" });
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      return fetchJson(`/api/screening/results?${params}`);
+    },
     refetchInterval: 10000,
   });
 
@@ -1129,9 +1145,19 @@ export default function Screening() {
     },
     {
       key: "ma",
-      title: "均线",
+      title: (
+        <button
+          type="button"
+          onClick={() => setFilterMaAligned((v) => !v)}
+          className={`cursor-pointer hover:text-green-500 transition-colors ${
+            filterMaAligned ? "text-green-500 underline underline-offset-2" : ""
+          }`}
+        >
+          均线{filterMaAligned ? "✓" : ""}
+        </button>
+      ),
       align: "center",
-      tip: "均线多头排列状态。'多'表示MA5>MA10>MA20>MA60，是典型上涨趋势，'-'表示未形成多头排列",
+      tip: "均线多头排列状态。'多'表示MA5>MA10>MA20>MA60，点击可过滤仅显示多头排列",
       render: (r) =>
         r.ma_aligned ? (
           <span className="text-green-500 font-medium">多</span>
@@ -1141,9 +1167,23 @@ export default function Screening() {
     },
     {
       key: "cross",
-      title: "金叉",
+      title: (
+        <button
+          type="button"
+          onClick={() =>
+            setFilterCross((v) =>
+              v === "" ? "M" : v === "M" ? "K" : v === "K" ? "MK" : "",
+            )
+          }
+          className={`cursor-pointer hover:text-yellow-600 transition-colors ${
+            filterCross ? "text-yellow-600 underline underline-offset-2" : ""
+          }`}
+        >
+          金叉{filterCross ? `(${filterCross})` : ""}
+        </button>
+      ),
       align: "center",
-      tip: "技术指标金叉信号。M=MACD金叉（中线买入信号），K=KDJ金叉（短线买入信号），同时出现金叉共振更强",
+      tip: "技术指标金叉信号。点击切换过滤：M=仅MACD金叉，K=仅KDJ金叉，MK=同时金叉，再点取消",
       render: (r) => (
         <div className="flex gap-1 justify-center">
           {r.macd_golden_cross && (
@@ -1957,19 +1997,38 @@ export default function Screening() {
             筛选结果 ({results?.screen_date ?? "-"}) - 共 {results?.total ?? 0}{" "}
             只
           </h3>
-          {results && results.total > 0 && config && (
-            <button
-              type="button"
-              onClick={() => setShowShareDialog(true)}
-              className="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted/50 transition-colors"
-            >
-              分享结果
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索代码或名称..."
+              className="px-3 py-1.5 text-sm border border-border rounded-md bg-background w-48 focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            {results && results.total > 0 && config && (
+              <button
+                type="button"
+                onClick={() => setShowShareDialog(true)}
+                className="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted/50 transition-colors"
+              >
+                分享结果
+              </button>
+            )}
+          </div>
         </div>
         <StockTable
           columns={screeningColumns}
-          data={results?.items ?? []}
+          data={(results?.items ?? []).filter((r) => {
+            if (filterMaAligned && !r.ma_aligned) return false;
+            if (filterCross === "M" && !r.macd_golden_cross) return false;
+            if (filterCross === "K" && !r.kdj_golden_cross) return false;
+            if (
+              filterCross === "MK" &&
+              (!r.macd_golden_cross || !r.kdj_golden_cross)
+            )
+              return false;
+            return true;
+          })}
           rowKey={(row) => row.stock_code}
           emptyText={'暂无选股结果，请点击"运行选股"'}
         />

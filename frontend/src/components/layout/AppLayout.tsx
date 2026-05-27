@@ -21,7 +21,7 @@ export function AppLayout() {
               - 他都行
             </span>
           </h1>
-          <p className="text-xs text-muted-foreground">量化选股系统</p>
+          <p className="text-xs text-muted-foreground">A股量化选股系统</p>
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {navItems.map((item) => (

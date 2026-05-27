@@ -1,7 +1,7 @@
 [project]
 name = "tdx-quant"
 version = "0.1.0"
-description = "通达信量化选股系统"
+description = "他都行量化选股系统"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.136.0",

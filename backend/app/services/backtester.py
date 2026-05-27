@@ -16,7 +16,7 @@ from loguru import logger
 from sqlalchemy import select
 
 from app.core.database import async_session
-from app.core.logging import publish_log
+from app.core.logging import publish_log, publish_log_sync
 from app.indicators.mytt_fork import (
     ADX,
     BIAS,
@@ -70,7 +70,10 @@ class BacktestEngine:
     def __post_init__(self):
         self.cash = self.initial_capital
 
-    def run(self, stocks: list[Stock], kline_cache: dict[str, dict]) -> dict:
+    def run(
+        self, stocks: list[Stock], kline_cache: dict[str, dict],
+        progress_callback=None,
+    ) -> dict:
         """Execute the backtest. Returns performance metrics."""
         trading_days = trading_days_between(self.start_date, self.end_date)
         if not trading_days:
@@ -84,8 +87,18 @@ class BacktestEngine:
         # Filter stocks by layer1 (static filters)
         eligible_stocks = [s for s in stocks if _pass_layer1(s, layer1_cfg)]
 
+        # Only keep stocks that have kline data (avoid repeated misses)
+        eligible_stocks = [s for s in eligible_stocks if s.code in kline_cache]
+
+        total_days = len(trading_days)
+        log_interval = max(1, total_days // 10)  # Report progress ~10 times
+
         for day_idx, today in enumerate(trading_days):
             today_str = today.isoformat()
+
+            # Report progress
+            if progress_callback and day_idx % log_interval == 0:
+                progress_callback(day_idx, total_days, today_str)
 
             # Step 1: Check existing positions for sell signals
             self._check_sells(today, day_idx, kline_cache, trading_days)
@@ -95,22 +108,23 @@ class BacktestEngine:
             self.equity_curve.append({"date": today_str, "equity": round(equity, 2)})
 
             # Step 3: Run screening on eligible stocks (using data up to today)
-            if day_idx < len(trading_days) - 1:  # Can't buy on last day
+            # Skip if positions are full or last day
+            if day_idx < total_days - 1 and len(self.positions) < self.max_positions:
                 selected = self._screen_stocks(
                     eligible_stocks, today, kline_cache,
                     layer2_cfg, layer3_cfg, layer4_cfg,
                 )
 
                 # Step 4: Buy selected stocks at next day's open
-                if selected and len(self.positions) < self.max_positions:
+                if selected:
                     next_day = trading_days[day_idx + 1]
                     available_slots = self.max_positions - len(self.positions)
                     to_buy = selected[:available_slots]
-                    self._execute_buys(to_buy, next_day, kline_cache)
+                    self._execute_buys(to_buy, next_day, day_idx + 1, kline_cache)
 
         # Force close all remaining positions at last day's close
         if trading_days:
-            self._force_close_all(trading_days[-1], kline_cache)
+            self._force_close_all(trading_days[-1], len(trading_days) - 1, kline_cache)
 
         # Calculate performance metrics
         return self._calc_performance(trading_days)
@@ -325,7 +339,7 @@ class BacktestEngine:
 
     def _execute_buys(
         self, selected: list[tuple[Stock, float]],
-        buy_date: date, kline_cache: dict[str, dict],
+        buy_date: date, buy_day_idx: int, kline_cache: dict[str, dict],
     ):
         """Buy selected stocks at buy_date's open price with equal weight."""
         buy_date_str = buy_date.isoformat()
@@ -340,7 +354,7 @@ class BacktestEngine:
             idx = kdata["dates"][buy_date_str]
             open_price = kdata["open"][idx]
             if open_price > 0:
-                buyable.append((stock, open_price, idx))
+                buyable.append((stock, open_price))
 
         if not buyable:
             return
@@ -348,15 +362,7 @@ class BacktestEngine:
         # Equal weight allocation
         capital_per_stock = self.cash / len(buyable)
 
-        # Find buy_day_idx in trading_days context
-        trading_days = trading_days_between(self.start_date, self.end_date)
-        buy_day_idx = 0
-        for i, td in enumerate(trading_days):
-            if td == buy_date:
-                buy_day_idx = i
-                break
-
-        for stock, open_price, _idx in buyable:
+        for stock, open_price in buyable:
             shares = int(capital_per_stock / open_price / 100) * 100  # Round to lots of 100
             if shares <= 0:
                 continue
@@ -373,11 +379,9 @@ class BacktestEngine:
                 buy_day_idx=buy_day_idx,
             ))
 
-    def _force_close_all(self, last_day: date, kline_cache: dict[str, dict]):
+    def _force_close_all(self, last_day: date, last_day_idx: int, kline_cache: dict[str, dict]):
         """Force close all open positions at last day's close."""
         last_day_str = last_day.isoformat()
-        trading_days = trading_days_between(self.start_date, self.end_date)
-        last_day_idx = len(trading_days) - 1
 
         for pos in self.positions:
             kdata = kline_cache.get(pos.stock_code)
@@ -470,7 +474,13 @@ class BacktestEngine:
 def _load_kline_cache(stocks: list[Stock]) -> dict[str, dict]:
     """Load all kline data into memory as numpy arrays with date index."""
     cache = {}
-    for stock in stocks:
+    total = len(stocks)
+    log_interval = max(1, total // 5)
+
+    for i, stock in enumerate(stocks):
+        if i % log_interval == 0:
+            publish_log_sync(f"加载K线数据: {i}/{total} ({round(i/total*100)}%)")
+
         df = read_kline(stock.market, stock.code)
         if df is None or len(df) < 60:
             continue
@@ -478,12 +488,12 @@ def _load_kline_cache(stocks: list[Stock]) -> dict[str, dict]:
         dates_list = df["date"].to_list()
         # Build date -> index mapping
         date_index = {}
-        for i, d in enumerate(dates_list):
+        for j, d in enumerate(dates_list):
             # Handle both string and date types
             if isinstance(d, str):
-                date_index[d] = i
+                date_index[d] = j
             else:
-                date_index[d.isoformat() if hasattr(d, "isoformat") else str(d)] = i
+                date_index[d.isoformat() if hasattr(d, "isoformat") else str(d)] = j
 
         cache[stock.code] = {
             "dates": date_index,
@@ -535,7 +545,12 @@ async def run_backtest(run_id: str):
             max_positions=run.max_positions,
         )
 
-        metrics = await asyncio.to_thread(engine.run, stocks, kline_cache)
+        # Progress reporting from thread (sync publish for real-time updates)
+        def on_progress(day_idx, total, date_str):
+            pct = round(day_idx / total * 100)
+            publish_log_sync(f"回测进度: {pct}% ({date_str})")
+
+        metrics = await asyncio.to_thread(engine.run, stocks, kline_cache, on_progress)
 
         if "error" in metrics:
             async with async_session() as session:

@@ -1,6 +1,6 @@
 # tdx-quant
 
-通达信量化选股系统 — 基于 FastAPI + React 的全栈量化分析平台。
+他都行量化选股系统 — 基于 FastAPI + React 的全栈量化分析平台。
 
 ## 技术栈
 

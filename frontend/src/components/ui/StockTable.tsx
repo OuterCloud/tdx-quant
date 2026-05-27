@@ -39,7 +39,7 @@ export function Tip({ text }: { text: string }) {
 
 export interface ColumnDef<T> {
   key: string;
-  title: string;
+  title: string | React.ReactNode;
   tip?: string;
   align?: "left" | "right" | "center";
   render: (row: T) => React.ReactNode;
