@@ -93,6 +93,7 @@ async def list_backtests():
                 win_rate=r.win_rate,
                 total_trades=r.total_trades,
                 profit_trades=r.profit_trades,
+                duration_seconds=r.duration_seconds,
                 created_at=r.created_at,
             )
             for r in runs
@@ -179,3 +180,18 @@ async def delete_backtest(run_id: str):
         await session.commit()
 
     return {"message": "Backtest deleted"}
+
+
+@router.post("/cleanup")
+async def cleanup_stuck_backtests():
+    """Mark all stuck 'running' backtest tasks as failed."""
+    from sqlalchemy import update
+
+    async with async_session() as session:
+        result = await session.execute(
+            update(BacktestRun)
+            .where(BacktestRun.status == "running")
+            .values(status="failed")
+        )
+        await session.commit()
+        return {"cleaned": result.rowcount}

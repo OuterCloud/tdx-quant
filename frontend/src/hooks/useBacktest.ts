@@ -38,6 +38,7 @@ export interface BacktestSummary {
   win_rate: number | null;
   total_trades: number;
   profit_trades: number;
+  duration_seconds: number | null;
   created_at: string;
 }
 
@@ -117,6 +118,20 @@ export function useDeleteBacktest() {
         throw new Error(body.detail || `HTTP ${res.status}`);
       }
       return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["backtests"] });
+    },
+  });
+}
+
+export function useCleanupBacktests() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/backtest/cleanup", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json() as Promise<{ cleaned: number }>;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["backtests"] });

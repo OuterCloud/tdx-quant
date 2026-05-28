@@ -30,6 +30,7 @@ class BacktestRun(Base):
     total_trades: Mapped[int] = mapped_column(Integer, default=0)
     profit_trades: Mapped[int] = mapped_column(Integer, default=0)
     equity_curve: Mapped[str | None] = mapped_column(Text, default=None)  # JSON
+    duration_seconds: Mapped[float | None] = mapped_column(Float, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     trades: Mapped[list["BacktestTrade"]] = relationship(

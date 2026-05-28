@@ -90,8 +90,16 @@ class BacktestEngine:
         # Only keep stocks that have kline data (avoid repeated misses)
         eligible_stocks = [s for s in eligible_stocks if s.code in kline_cache]
 
+        # Pre-compute all indicators once for eligible stocks (the key optimization)
+        if progress_callback:
+            progress_callback(0, 1, "预计算指标中...")
+        indicator_cache = _precompute_all_indicators(eligible_stocks, kline_cache, progress_callback)
+
         total_days = len(trading_days)
-        log_interval = max(1, total_days // 10)  # Report progress ~10 times
+        log_interval = max(1, total_days // 10)
+
+        # Build set of held codes for O(1) lookup
+        held_codes: set[str] = set()
 
         for day_idx, today in enumerate(trading_days):
             today_str = today.isoformat()
@@ -102,17 +110,18 @@ class BacktestEngine:
 
             # Step 1: Check existing positions for sell signals
             self._check_sells(today, day_idx, kline_cache, trading_days)
+            held_codes = {p.stock_code for p in self.positions}
 
             # Step 2: Calculate daily equity
             equity = self._calc_equity(today, kline_cache)
             self.equity_curve.append({"date": today_str, "equity": round(equity, 2)})
 
-            # Step 3: Run screening on eligible stocks (using data up to today)
+            # Step 3: Run screening on eligible stocks (using precomputed indicators)
             # Skip if positions are full or last day
             if day_idx < total_days - 1 and len(self.positions) < self.max_positions:
-                selected = self._screen_stocks(
-                    eligible_stocks, today, kline_cache,
-                    layer2_cfg, layer3_cfg, layer4_cfg,
+                selected = self._screen_stocks_fast(
+                    eligible_stocks, today_str, kline_cache, indicator_cache,
+                    held_codes, layer2_cfg, layer3_cfg, layer4_cfg,
                 )
 
                 # Step 4: Buy selected stocks at next day's open
@@ -194,34 +203,34 @@ class BacktestEngine:
 
         self.positions = remaining
 
-    def _screen_stocks(
-        self, stocks: list[Stock], today: date,
-        kline_cache: dict[str, dict],
+    def _screen_stocks_fast(
+        self, stocks: list[Stock], today_str: str,
+        kline_cache: dict[str, dict], indicator_cache: dict[str, dict],
+        held_codes: set[str],
         layer2_cfg: dict, layer3_cfg: dict, layer4_cfg: dict,
     ) -> list[tuple[Stock, float]]:
-        """Run 4-layer screening using historical data up to today."""
-        today_str = today.isoformat()
+        """Fast screening using precomputed indicator arrays (O(1) per stock per day)."""
         results = []
 
         for stock in stocks:
-            # Skip if already in portfolio
-            if any(p.stock_code == stock.code for p in self.positions):
+            if stock.code in held_codes:
                 continue
 
-            kdata = kline_cache.get(stock.code)
-            if not kdata:
+            ic = indicator_cache.get(stock.code)
+            if not ic:
                 continue
 
+            kdata = kline_cache[stock.code]
             dates = kdata["dates"]
             if today_str not in dates:
                 continue
 
             idx = dates[today_str]
-            if idx < 60:  # Need enough history for indicators
+            if idx < 60:
                 continue
 
-            # Compute indicators using data up to today
-            indicators = self._compute_indicators(kdata, idx)
+            # Build indicators dict from precomputed arrays (just array indexing)
+            indicators = _get_indicators_at(ic, kdata, idx)
             if indicators is None:
                 continue
 
@@ -244,98 +253,6 @@ class BacktestEngine:
         # Sort by score descending
         results.sort(key=lambda x: x[1], reverse=True)
         return results
-
-    def _compute_indicators(self, kdata: dict, end_idx: int) -> dict | None:
-        """Compute technical indicators for a stock up to end_idx."""
-        # Use data from 0 to end_idx (inclusive)
-        n = end_idx + 1
-        close = kdata["close"][:n]
-        high = kdata["high"][:n]
-        low = kdata["low"][:n]
-        volume = kdata["volume"][:n]
-        amount = kdata["amount"][:n]
-
-        if len(close) < 60:
-            return None
-
-        last = len(close) - 1
-        prev = last - 1
-
-        ma5 = MA(close, 5)
-        ma10 = MA(close, 10)
-        ma20 = MA(close, 20)
-        ma60 = MA(close, 60)
-
-        dif, dea, hist = MACD(close)
-        k, d, j = KDJ(high, low, close)
-        rsi14 = RSI(close, 14)
-        boll_upper, boll_mid, boll_lower = BOLL(close, 20, 2.0)
-        adx_val, plus_di, minus_di = ADX(high, low, close, 14)
-        bias20 = BIAS(close, 20)
-        wr14 = WR(high, low, close, 14)
-        vol_ratio = VOLUME_RATIO(volume, 5)
-        consec = CONSECUTIVE_UP(close)
-        mdd20 = MAX_DRAWDOWN(close, 20)
-
-        def safe(val):
-            if val is None or (isinstance(val, float) and np.isnan(val)):
-                return None
-            v = float(val)
-            return None if np.isnan(v) else v
-
-        ma_aligned = bool(
-            not np.isnan(ma60[last])
-            and ma5[last] > ma10[last] > ma20[last] > ma60[last]
-        )
-
-        macd_golden_cross = bool(
-            not np.isnan(dif[last]) and not np.isnan(dea[last])
-            and not np.isnan(dif[prev]) and not np.isnan(dea[prev])
-            and dif[prev] <= dea[prev] and dif[last] > dea[last]
-        )
-
-        kdj_golden_cross = bool(
-            not np.isnan(k[last]) and not np.isnan(d[last])
-            and not np.isnan(k[prev]) and not np.isnan(d[prev])
-            and k[prev] <= d[prev] and k[last] > d[last]
-        )
-
-        boll_position = None
-        if not np.isnan(boll_upper[last]) and not np.isnan(boll_lower[last]):
-            boll_width = boll_upper[last] - boll_lower[last]
-            if boll_width > 0:
-                boll_position = (close[last] - boll_lower[last]) / boll_width
-
-        trend_strong = bool(not np.isnan(adx_val[last]) and adx_val[last] > 25)
-        di_bullish = bool(
-            not np.isnan(plus_di[last]) and not np.isnan(minus_di[last])
-            and plus_di[last] > minus_di[last]
-        )
-
-        return {
-            "close": float(close[last]),
-            "amount": float(amount[last]),
-            "ma5": safe(ma5[last]),
-            "ma10": safe(ma10[last]),
-            "ma20": safe(ma20[last]),
-            "ma60": safe(ma60[last]),
-            "macd_dif": safe(dif[last]),
-            "macd_dea": safe(dea[last]),
-            "macd_hist": safe(hist[last]),
-            "macd_golden_cross": macd_golden_cross,
-            "kdj_golden_cross": kdj_golden_cross,
-            "rsi14": safe(rsi14[last]),
-            "boll_position": round(boll_position, 4) if boll_position is not None else None,
-            "adx": safe(adx_val[last]),
-            "trend_strong": trend_strong,
-            "di_bullish": di_bullish,
-            "bias20": safe(bias20[last]),
-            "wr14": safe(wr14[last]),
-            "volume_ratio": safe(vol_ratio[last]),
-            "consecutive_up": int(consec[last]),
-            "max_drawdown_20d": safe(mdd20[last]),
-            "ma_aligned": ma_aligned,
-        }
 
     def _execute_buys(
         self, selected: list[tuple[Stock, float]],
@@ -471,6 +388,145 @@ class BacktestEngine:
         }
 
 
+def _precompute_all_indicators(
+    stocks: list[Stock], kline_cache: dict[str, dict], progress_callback=None,
+) -> dict[str, dict]:
+    """Pre-compute all indicator arrays for each stock (one-time cost).
+
+    Returns {stock_code: {indicator_name: numpy_array, ...}}
+    """
+    cache = {}
+    total = len(stocks)
+    log_interval = max(1, total // 10)
+
+    for i, stock in enumerate(stocks):
+        if i % log_interval == 0:
+            publish_log_sync(f"预计算指标: {i}/{total} ({round(i/total*100)}%)")
+
+        kdata = kline_cache.get(stock.code)
+        if not kdata:
+            continue
+
+        close = kdata["close"]
+        high = kdata["high"]
+        low = kdata["low"]
+        volume = kdata["volume"]
+
+        if len(close) < 60:
+            continue
+
+        # Compute all indicators on the FULL series (only once per stock)
+        ma5 = MA(close, 5)
+        ma10 = MA(close, 10)
+        ma20 = MA(close, 20)
+        ma60 = MA(close, 60)
+        dif, dea, hist = MACD(close)
+        k, d, _j = KDJ(high, low, close)
+        rsi14 = RSI(close, 14)
+        boll_upper, _boll_mid, boll_lower = BOLL(close, 20, 2.0)
+        adx_val, plus_di, minus_di = ADX(high, low, close, 14)
+        bias20 = BIAS(close, 20)
+        wr14 = WR(high, low, close, 14)
+        vol_ratio = VOLUME_RATIO(volume, 5)
+        consec = CONSECUTIVE_UP(close)
+        mdd20 = MAX_DRAWDOWN(close, 20)
+
+        cache[stock.code] = {
+            "ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60,
+            "dif": dif, "dea": dea, "hist": hist,
+            "k": k, "d": d,
+            "rsi14": rsi14,
+            "boll_upper": boll_upper, "boll_lower": boll_lower,
+            "adx": adx_val, "plus_di": plus_di, "minus_di": minus_di,
+            "bias20": bias20, "wr14": wr14,
+            "vol_ratio": vol_ratio, "consec": consec, "mdd20": mdd20,
+        }
+
+    publish_log_sync(f"预计算指标完成: {len(cache)} 只股票")
+    return cache
+
+
+def _get_indicators_at(ic: dict, kdata: dict, idx: int) -> dict | None:
+    """Extract indicator values at a specific index from precomputed arrays."""
+    if idx < 1:
+        return None
+    prev = idx - 1
+
+    def safe(arr, i):
+        v = arr[i]
+        if np.isnan(v):
+            return None
+        return float(v)
+
+    ma5_v = ic["ma5"][idx]
+    ma10_v = ic["ma10"][idx]
+    ma20_v = ic["ma20"][idx]
+    ma60_v = ic["ma60"][idx]
+
+    ma_aligned = bool(
+        not np.isnan(ma60_v)
+        and ma5_v > ma10_v > ma20_v > ma60_v
+    )
+
+    dif_cur, dea_cur = ic["dif"][idx], ic["dea"][idx]
+    dif_prev, dea_prev = ic["dif"][prev], ic["dea"][prev]
+    macd_golden_cross = bool(
+        not np.isnan(dif_cur) and not np.isnan(dea_cur)
+        and not np.isnan(dif_prev) and not np.isnan(dea_prev)
+        and dif_prev <= dea_prev and dif_cur > dea_cur
+    )
+
+    k_cur, d_cur = ic["k"][idx], ic["d"][idx]
+    k_prev, d_prev = ic["k"][prev], ic["d"][prev]
+    kdj_golden_cross = bool(
+        not np.isnan(k_cur) and not np.isnan(d_cur)
+        and not np.isnan(k_prev) and not np.isnan(d_prev)
+        and k_prev <= d_prev and k_cur > d_cur
+    )
+
+    boll_upper_v = ic["boll_upper"][idx]
+    boll_lower_v = ic["boll_lower"][idx]
+    boll_position = None
+    if not np.isnan(boll_upper_v) and not np.isnan(boll_lower_v):
+        boll_width = boll_upper_v - boll_lower_v
+        if boll_width > 0:
+            boll_position = (kdata["close"][idx] - boll_lower_v) / boll_width
+
+    adx_v = ic["adx"][idx]
+    trend_strong = bool(not np.isnan(adx_v) and adx_v > 25)
+    plus_di_v = ic["plus_di"][idx]
+    minus_di_v = ic["minus_di"][idx]
+    di_bullish = bool(
+        not np.isnan(plus_di_v) and not np.isnan(minus_di_v)
+        and plus_di_v > minus_di_v
+    )
+
+    return {
+        "close": float(kdata["close"][idx]),
+        "amount": float(kdata["amount"][idx]),
+        "ma5": safe(ic["ma5"], idx),
+        "ma10": safe(ic["ma10"], idx),
+        "ma20": safe(ic["ma20"], idx),
+        "ma60": safe(ic["ma60"], idx),
+        "macd_dif": safe(ic["dif"], idx),
+        "macd_dea": safe(ic["dea"], idx),
+        "macd_hist": safe(ic["hist"], idx),
+        "macd_golden_cross": macd_golden_cross,
+        "kdj_golden_cross": kdj_golden_cross,
+        "rsi14": safe(ic["rsi14"], idx),
+        "boll_position": round(boll_position, 4) if boll_position is not None else None,
+        "adx": safe(ic["adx"], idx),
+        "trend_strong": trend_strong,
+        "di_bullish": di_bullish,
+        "bias20": safe(ic["bias20"], idx),
+        "wr14": safe(ic["wr14"], idx),
+        "volume_ratio": safe(ic["vol_ratio"], idx),
+        "consecutive_up": int(ic["consec"][idx]),
+        "max_drawdown_20d": safe(ic["mdd20"], idx),
+        "ma_aligned": ma_aligned,
+    }
+
+
 def _load_kline_cache(stocks: list[Stock]) -> dict[str, dict]:
     """Load all kline data into memory as numpy arrays with date index."""
     cache = {}
@@ -486,10 +542,8 @@ def _load_kline_cache(stocks: list[Stock]) -> dict[str, dict]:
             continue
 
         dates_list = df["date"].to_list()
-        # Build date -> index mapping
         date_index = {}
         for j, d in enumerate(dates_list):
-            # Handle both string and date types
             if isinstance(d, str):
                 date_index[d] = j
             else:
@@ -504,6 +558,8 @@ def _load_kline_cache(stocks: list[Stock]) -> dict[str, dict]:
             "volume": df["volume"].to_numpy().astype(np.float64),
             "amount": df["amount"].to_numpy().astype(np.float64),
         }
+
+    publish_log_sync(f"K线加载完成: {len(cache)} 只股票")
     return cache
 
 
@@ -519,6 +575,9 @@ async def run_backtest(run_id: str):
         await session.commit()
 
     await publish_log(f"回测开始: {run.name} ({run.start_date} ~ {run.end_date})")
+
+    import time
+    t_start = time.time()
 
     try:
         # Load stocks
@@ -561,6 +620,7 @@ async def run_backtest(run_id: str):
             return
 
         # Persist results
+        duration = round(time.time() - t_start, 1)
         async with async_session() as session:
             run = await session.get(BacktestRun, run_id)
             run.status = "done"
@@ -572,6 +632,7 @@ async def run_backtest(run_id: str):
             run.total_trades = metrics.get("total_trades", 0)
             run.profit_trades = metrics.get("profit_trades", 0)
             run.equity_curve = json.dumps(engine.equity_curve, ensure_ascii=False)
+            run.duration_seconds = duration
 
             # Save trades
             for t in engine.closed_trades:

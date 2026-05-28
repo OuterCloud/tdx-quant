@@ -6,6 +6,7 @@ import {
   type BacktestSummary,
   useBacktestDetail,
   useBacktestList,
+  useCleanupBacktests,
   useCreateBacktest,
   useDeleteBacktest,
 } from "../hooks/useBacktest";
@@ -324,12 +325,17 @@ export default function Backtest() {
   const { data: backtests } = useBacktestList();
   const createMutation = useCreateBacktest();
   const deleteMutation = useDeleteBacktest();
+  const cleanupMutation = useCleanupBacktests();
   const { data: customStrategies } = useCustomStrategies();
 
   const [selectedPreset, setSelectedPreset] = useState<string>("放量突破");
   const [selectedCustomId, setSelectedCustomId] = useState<number | null>(null);
-  const [startDate, setStartDate] = useState("2024-01-01");
-  const [endDate, setEndDate] = useState("2024-06-30");
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 3);
+    return d.toISOString().slice(0, 10);
+  });
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [takeProfit, setTakeProfit] = useState(10);
   const [stopLoss, setStopLoss] = useState(5);
   const [maxHoldDays, setMaxHoldDays] = useState(5);
@@ -539,8 +545,18 @@ export default function Backtest() {
       {/* History List */}
       {backtests && backtests.length > 0 && (
         <div className="rounded-lg border border-border">
-          <div className="p-4 border-b border-border">
+          <div className="p-4 border-b border-border flex items-center justify-between">
             <h3 className="font-semibold">回测历史</h3>
+            {backtests.some((bt) => bt.status === "running") && (
+              <button
+                type="button"
+                onClick={() => cleanupMutation.mutate()}
+                disabled={cleanupMutation.isPending}
+                className="text-xs px-2 py-1 border border-border rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {cleanupMutation.isPending ? "清理中..." : "清理卡住的任务"}
+              </button>
+            )}
           </div>
           <div className="divide-y divide-border">
             {backtests.map((bt) => (
@@ -564,6 +580,13 @@ export default function Backtest() {
                   </span>
                 </div>
                 <div className="flex items-center gap-4">
+                  {bt.status === "done" && bt.duration_seconds != null && (
+                    <span className="text-xs text-muted-foreground">
+                      耗时 {bt.duration_seconds >= 60
+                        ? `${Math.floor(bt.duration_seconds / 60)}分${Math.round(bt.duration_seconds % 60)}秒`
+                        : `${Math.round(bt.duration_seconds)}秒`}
+                    </span>
+                  )}
                   {bt.status === "done" && bt.total_return != null && (
                     <span className={`text-sm font-medium ${bt.total_return >= 0 ? "text-red-500" : "text-green-500"}`}>
                       {(bt.total_return * 100).toFixed(2)}%

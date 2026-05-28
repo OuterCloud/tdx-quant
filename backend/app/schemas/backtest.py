@@ -47,6 +47,7 @@ class BacktestSummary(BaseModel):
     win_rate: float | None = None
     total_trades: int = 0
     profit_trades: int = 0
+    duration_seconds: float | None = None
     created_at: datetime
 
 
