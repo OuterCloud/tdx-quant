@@ -307,7 +307,12 @@ deploy() {
     done
 
     step "执行数据库迁移..."
-    $COMPOSE --env-file "$ENV_FILE" -f docker-compose.prod.yaml exec -T backend alembic upgrade head
+    if ! $COMPOSE --env-file "$ENV_FILE" -f docker-compose.prod.yaml exec -T backend alembic upgrade head; then
+        error "数据库迁移失败！"
+        warn "如果提示密码错误，可能是 .env 重新生成导致密码不一致"
+        warn "解决方法: ./deploy.sh clean && bash deploy.sh"
+        exit 1
+    fi
 
     echo ""
     info "========================================="
