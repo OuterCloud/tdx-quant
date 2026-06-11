@@ -28,37 +28,141 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 step()  { echo -e "${CYAN}[STEP]${NC} $*"; }
 
+# ─── Docker 自动安装 ───────────────────────────────────────────────────────────
+
+install_docker() {
+    step "自动安装 Docker..."
+
+    # Detect OS
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS_ID="${ID}"
+        OS_ID_LIKE="${ID_LIKE:-}"
+    else
+        error "无法检测操作系统类型"
+        exit 1
+    fi
+
+    info "检测到系统: ${PRETTY_NAME:-$OS_ID}"
+
+    # Determine package manager and install
+    if command -v dnf &>/dev/null; then
+        # RHEL family: Rocky, AlmaLinux, CentOS, Fedora
+        info "使用 dnf 安装 Docker..."
+        dnf -y -q install dnf-plugins-core
+        # Rocky/Alma/CentOS use centos repo path
+        local repo_path="centos"
+        if [ "$OS_ID" = "fedora" ]; then
+            repo_path="fedora"
+        fi
+        dnf config-manager --add-repo "https://download.docker.com/linux/${repo_path}/docker-ce.repo" \
+            || dnf config-manager --add-repo "https://mirrors.aliyun.com/docker-ce/linux/${repo_path}/docker-ce.repo" \
+            || { error "添加 Docker 仓库失败"; exit 1; }
+        dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+    elif command -v apt-get &>/dev/null; then
+        # Debian family: Ubuntu, Debian
+        info "使用 apt 安装 Docker..."
+        apt-get update -qq
+        apt-get install -y -qq ca-certificates curl gnupg
+
+        install -m 0755 -d /etc/apt/keyrings
+        local deb_id="$OS_ID"
+        # Ubuntu derivatives may need ubuntu as base
+        if [[ "$OS_ID_LIKE" == *"ubuntu"* ]]; then
+            deb_id="ubuntu"
+        elif [[ "$OS_ID_LIKE" == *"debian"* ]]; then
+            deb_id="debian"
+        fi
+
+        curl -fsSL "https://download.docker.com/linux/${deb_id}/gpg" | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        chmod a+r /etc/apt/keyrings/docker.gpg
+
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${deb_id} $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+
+        apt-get update -qq
+        apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+    else
+        error "不支持的包管理器，请手动安装 Docker"
+        echo "  参考: https://docs.docker.com/engine/install/"
+        exit 1
+    fi
+
+    # Start and enable Docker
+    systemctl start docker
+    systemctl enable docker
+
+    info "Docker 安装完成: $(docker --version)"
+}
+
+# ─── Docker 镜像加速配置 ──────────────────────────────────────────────────────
+
+setup_docker_mirror() {
+    local daemon_json="/etc/docker/daemon.json"
+    if [ -f "$daemon_json" ] && grep -q "registry-mirrors" "$daemon_json"; then
+        return  # Already configured
+    fi
+
+    step "配置 Docker 镜像加速..."
+    mkdir -p /etc/docker
+    cat > "$daemon_json" <<'MIRROR'
+{
+  "registry-mirrors": [
+    "https://mirror.ccs.tencentyun.com",
+    "https://docker.1ms.run"
+  ]
+}
+MIRROR
+    systemctl daemon-reload
+    systemctl restart docker
+    info "镜像加速已配置"
+}
+
 # ─── 环境检测 ──────────────────────────────────────────────────────────────────
 
 check_requirements() {
     step "检查系统依赖..."
 
-    # Check Docker
+    # Install Docker if not present
     if ! command -v docker &>/dev/null; then
-        error "未检测到 Docker，请先安装 Docker"
-        echo "  安装命令: curl -fsSL https://get.docker.com | sh"
-        exit 1
+        warn "未检测到 Docker，开始自动安装..."
+        install_docker
+        setup_docker_mirror
     fi
 
-    # Check Docker Compose (v2 plugin)
+    # Install docker-compose-plugin if compose not available
+    if ! docker compose version &>/dev/null && ! command -v docker-compose &>/dev/null; then
+        warn "未检测到 Docker Compose，尝试安装..."
+        if command -v dnf &>/dev/null; then
+            dnf install -y docker-compose-plugin
+        elif command -v apt-get &>/dev/null; then
+            apt-get install -y -qq docker-compose-plugin
+        fi
+    fi
+
+    # Set COMPOSE command
     if docker compose version &>/dev/null; then
         COMPOSE="docker compose"
     elif command -v docker-compose &>/dev/null; then
         COMPOSE="docker-compose"
     else
-        error "未检测到 Docker Compose，请安装 docker-compose-plugin"
-        echo "  安装命令: sudo apt install docker-compose-plugin"
+        error "Docker Compose 安装失败"
         exit 1
     fi
 
-    # Check Docker daemon running
+    # Ensure Docker daemon is running
     if ! docker info &>/dev/null; then
-        error "Docker 服务未启动"
-        echo "  启动命令: sudo systemctl start docker"
-        exit 1
+        info "启动 Docker 服务..."
+        systemctl start docker
+        sleep 2
+        if ! docker info &>/dev/null; then
+            error "Docker 服务启动失败"
+            exit 1
+        fi
     fi
 
-    info "环境检查通过 (Docker + Compose)"
+    info "环境检查通过 (Docker $(docker --version | grep -oP '\d+\.\d+\.\d+') + Compose)"
 }
 
 # ─── 环境配置 ──────────────────────────────────────────────────────────────────
