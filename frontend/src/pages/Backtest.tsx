@@ -98,7 +98,7 @@ const PRESET_STRATEGIES: Record<string, { description: string; config: Record<st
 
 function HelpTooltip() {
   const [open, setOpen] = useState(false);
-  const timeout = useRef<ReturnType<typeof setTimeout>>();
+  const timeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const show = () => { clearTimeout(timeout.current); setOpen(true); };
   const hide = () => { timeout.current = setTimeout(() => setOpen(false), 150); };

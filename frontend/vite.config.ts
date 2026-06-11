@@ -20,6 +20,7 @@ export default defineConfig({
       "/ws": {
         target: "ws://localhost:8001",
         ws: true,
+        // @ts-expect-error -- http-proxy event hooks, valid at runtime
         on: {
           error: () => {},
           proxyReqWs: () => {},
