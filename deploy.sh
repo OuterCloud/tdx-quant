@@ -101,22 +101,33 @@ install_docker() {
 setup_docker_mirror() {
     local daemon_json="/etc/docker/daemon.json"
     if [ -f "$daemon_json" ] && grep -q "registry-mirrors" "$daemon_json"; then
-        return  # Already configured
+        info "Docker 镜像加速已配置"
+        return
     fi
 
-    step "配置 Docker 镜像加速..."
+    step "配置 Docker 镜像加速（国内源）..."
     mkdir -p /etc/docker
+
+    # Merge with existing daemon.json if present
+    if [ -f "$daemon_json" ]; then
+        # Backup existing config
+        cp "$daemon_json" "${daemon_json}.bak"
+    fi
+
     cat > "$daemon_json" <<'MIRROR'
 {
   "registry-mirrors": [
-    "https://mirror.ccs.tencentyun.com",
-    "https://docker.1ms.run"
+    "https://docker.1ms.run",
+    "https://docker.xuanyuan.me",
+    "https://docker.m.daocloud.io",
+    "https://mirror.ccs.tencentyun.com"
   ]
 }
 MIRROR
     systemctl daemon-reload
     systemctl restart docker
-    info "镜像加速已配置"
+    sleep 2
+    info "镜像加速已配置并生效"
 }
 
 # ─── 环境检测 ──────────────────────────────────────────────────────────────────
