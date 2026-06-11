@@ -263,10 +263,14 @@ setup_env() {
     local db_password
     db_password=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
 
-    # Find available port
-    local http_port
-    http_port=$(find_available_port)
-    info "检测到可用端口: $http_port"
+    # Find available port (default 3333)
+    local http_port=3333
+    if ss -tlnp 2>/dev/null | grep -q ":3333 " || \
+       netstat -tlnp 2>/dev/null | grep -q ":3333 "; then
+        http_port=$(find_available_port)
+        warn "端口 3333 被占用，自动选择: $http_port"
+    fi
+    info "使用端口: $http_port"
 
     cat > "$ENV_FILE" <<EOF
 # TDX 量化选股系统 - 生产环境配置
