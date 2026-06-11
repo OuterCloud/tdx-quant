@@ -7,6 +7,7 @@ import Sectors from "@/pages/Sectors";
 import Screening from "@/pages/Screening";
 import Backtest from "@/pages/Backtest";
 import Settings from "@/pages/Settings";
+import Guide from "@/pages/Guide";
 
 const queryClient = new QueryClient();
 
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="screening" element={<Screening />} />
             <Route path="backtest" element={<Backtest />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="guide" element={<Guide />} />
           </Route>
         </Routes>
       </BrowserRouter>

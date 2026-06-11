@@ -15,12 +15,27 @@ export function AppLayout() {
     <div className="flex h-screen">
       <aside className="w-60 border-r border-border bg-muted/50 flex flex-col">
         <div className="p-4 border-b border-border">
-          <h1 className="text-lg font-bold">
-            TDX{" "}
-            <span className="text-sm font-normal text-muted-foreground">
-              - 他都行
-            </span>
-          </h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-lg font-bold">
+              TDX{" "}
+              <span className="text-sm font-normal text-muted-foreground">
+                - 他都行
+              </span>
+            </h1>
+            <NavLink
+              to="/guide"
+              className={({ isActive }) =>
+                cn(
+                  "w-7 h-7 rounded-full flex items-center justify-center text-sm transition-colors",
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-accent text-muted-foreground",
+                )
+              }
+            >
+              ❓
+            </NavLink>
+          </div>
           <p className="text-xs text-muted-foreground">A股量化选股系统</p>
         </div>
         <nav className="flex-1 p-2 space-y-1">

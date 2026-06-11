@@ -8,7 +8,34 @@
 - **前端**: React 19 / TypeScript / Vite / Tailwind CSS v4 / Shadcn/ui
 - **工具链**: uv / pnpm / Ruff / Biome / Docker Compose
 
-## 快速开始
+## 生产部署
+
+服务器只需安装 Docker，无需 Node.js、Python 等运行时。
+
+```bash
+# 克隆代码
+git clone <your-repo-url> tdx-quant && cd tdx-quant
+
+# 一键部署（自动检测环境 → 生成配置 → 构建镜像 → 启动服务 → 数据库迁移）
+chmod +x deploy.sh
+./deploy.sh
+```
+
+部署完成后通过 `http://<服务器IP>` 访问（默认 80 端口，可在 `.env` 中修改 `HTTP_PORT`）。
+
+### 部署管理命令
+
+```bash
+./deploy.sh              # 首次部署
+./deploy.sh update       # 代码更新后重新构建部署
+./deploy.sh status       # 查看服务状态
+./deploy.sh logs         # 查看全部日志
+./deploy.sh logs backend # 查看后端日志
+./deploy.sh stop         # 停止服务
+./deploy.sh clean        # 停止并清除所有数据（慎用）
+```
+
+## 本地开发
 
 ### 前置条件
 
@@ -47,26 +74,32 @@ make frontend
 ### 访问
 
 - 前端: http://localhost:5173
-- 后端 API 文档: http://localhost:8000/docs
-- 健康检查: http://localhost:8000/api/health
+- 后端 API 文档: http://localhost:8001/docs
+- 健康检查: http://localhost:8001/api/health
 
 ## 项目结构
 
 ```
 tdx-quant/
-├── backend/          # FastAPI 后端
+├── backend/              # FastAPI 后端
 │   ├── app/
-│   │   ├── api/      # 路由
-│   │   ├── core/     # 配置、数据库、Redis
-│   │   ├── models/   # SQLAlchemy 模型
-│   │   └── schemas/  # Pydantic schemas
-│   └── alembic/      # 数据库迁移
-├── frontend/         # React 前端
-│   └── src/
-│       ├── components/
-│       ├── pages/
-│       └── api/
-├── docker-compose.yaml
-├── docker-compose.dev.yaml
-└── Makefile
+│   │   ├── api/          # 路由
+│   │   ├── core/         # 配置、数据库、Redis
+│   │   ├── models/       # SQLAlchemy 模型
+│   │   └── schemas/      # Pydantic schemas
+│   ├── alembic/          # 数据库迁移
+│   └── Dockerfile
+├── frontend/             # React 前端
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   └── api/
+│   └── Dockerfile
+├── docker-compose.yaml       # 开发编排（旧）
+├── docker-compose.dev.yaml   # 开发基础设施（Postgres + Redis）
+├── docker-compose.prod.yaml  # 生产编排（全栈容器化）
+├── nginx.conf                # 反向代理配置
+├── deploy.sh                 # 生产一键部署脚本
+├── service.sh                # 本地开发服务管理
+└── Makefile                  # 开发快捷命令
 ```
