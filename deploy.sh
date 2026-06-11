@@ -16,6 +16,15 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$PROJECT_DIR/.env"
 
+# Detect compose command early (used by all subcommands)
+if docker compose version &>/dev/null 2>&1; then
+    COMPOSE="docker compose"
+elif command -v docker-compose &>/dev/null 2>&1; then
+    COMPOSE="docker-compose"
+else
+    COMPOSE="docker compose"  # fallback, will be validated in check_requirements
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -223,6 +232,25 @@ check_requirements() {
 
 # ─── 环境配置 ──────────────────────────────────────────────────────────────────
 
+find_available_port() {
+    # Try preferred ports in order, pick first available
+    local ports=(80 8080 3000 9000)
+    for p in "${ports[@]}"; do
+        if ! ss -tlnp 2>/dev/null | grep -q ":${p} " && \
+           ! netstat -tlnp 2>/dev/null | grep -q ":${p} "; then
+            echo "$p"
+            return
+        fi
+    done
+    # All preferred ports taken, find a random available one
+    local p=8100
+    while ss -tlnp 2>/dev/null | grep -q ":${p} " || \
+          netstat -tlnp 2>/dev/null | grep -q ":${p} "; do
+        p=$((p + 1))
+    done
+    echo "$p"
+}
+
 setup_env() {
     if [ -f "$ENV_FILE" ]; then
         info "使用已有配置: $ENV_FILE"
@@ -235,6 +263,11 @@ setup_env() {
     local db_password
     db_password=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
 
+    # Find available port
+    local http_port
+    http_port=$(find_available_port)
+    info "检测到可用端口: $http_port"
+
     cat > "$ENV_FILE" <<EOF
 # TDX 量化选股系统 - 生产环境配置
 # 首次部署自动生成，可按需修改后重新部署
@@ -245,7 +278,7 @@ POSTGRES_PASSWORD=${db_password}
 POSTGRES_DB=tdx_quant
 
 # 服务端口（宿主机映射）
-HTTP_PORT=80
+HTTP_PORT=${http_port}
 
 # 后端
 DATABASE_URL=postgresql+asyncpg://tdx:${db_password}@postgres:5432/tdx_quant
