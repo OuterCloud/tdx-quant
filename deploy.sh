@@ -100,20 +100,11 @@ install_docker() {
 
 setup_docker_mirror() {
     local daemon_json="/etc/docker/daemon.json"
-    if [ -f "$daemon_json" ] && grep -q "registry-mirrors" "$daemon_json"; then
-        info "Docker 镜像加速已配置"
-        return
-    fi
 
     step "配置 Docker 镜像加速（国内源）..."
     mkdir -p /etc/docker
 
-    # Merge with existing daemon.json if present
-    if [ -f "$daemon_json" ]; then
-        # Backup existing config
-        cp "$daemon_json" "${daemon_json}.bak"
-    fi
-
+    # Always overwrite to ensure latest working mirrors
     cat > "$daemon_json" <<'MIRROR'
 {
   "registry-mirrors": [
@@ -128,6 +119,58 @@ MIRROR
     systemctl restart docker
     sleep 2
     info "镜像加速已配置并生效"
+}
+
+# ─── 预拉取基础镜像（带重试 + 多源 fallback）────────────────────────────────────
+
+pull_base_images() {
+    step "拉取基础镜像..."
+
+    # Mirror prefixes to try (in order)
+    local mirrors=(
+        "docker.m.daocloud.io/library"
+        "docker.1ms.run/library"
+        "docker.xuanyuan.me/library"
+        ""  # direct pull (last resort)
+    )
+
+    local images=("postgres:16-alpine" "redis:7-alpine" "nginx:alpine" "node:22-alpine" "python:3.13-slim")
+
+    for img in "${images[@]}"; do
+        if docker image inspect "$img" &>/dev/null; then
+            info "  $img (已存在)"
+            continue
+        fi
+
+        local pulled=false
+        for mirror in "${mirrors[@]}"; do
+            local full_img
+            if [ -n "$mirror" ]; then
+                full_img="${mirror}/${img}"
+            else
+                full_img="$img"
+            fi
+
+            info "  尝试拉取: $full_img"
+            if docker pull "$full_img" --quiet 2>/dev/null; then
+                # Tag to standard name if pulled from mirror
+                if [ -n "$mirror" ]; then
+                    docker tag "$full_img" "$img"
+                fi
+                info "  $img ✓"
+                pulled=true
+                break
+            fi
+        done
+
+        if [ "$pulled" = false ]; then
+            error "  $img 拉取失败（所有源均超时）"
+            error "请检查网络连接，或手动配置可用的 Docker 镜像源"
+            exit 1
+        fi
+    done
+
+    info "基础镜像准备完毕"
 }
 
 # ─── 环境检测 ──────────────────────────────────────────────────────────────────
@@ -216,6 +259,8 @@ EOF
 # ─── 部署 ──────────────────────────────────────────────────────────────────────
 
 deploy() {
+    pull_base_images
+
     step "构建并启动服务..."
     cd "$PROJECT_DIR"
     $COMPOSE --env-file "$ENV_FILE" -f docker-compose.prod.yaml build
