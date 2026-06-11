@@ -139,8 +139,10 @@ check_requirements() {
     if ! command -v docker &>/dev/null; then
         warn "未检测到 Docker，开始自动安装..."
         install_docker
-        setup_docker_mirror
     fi
+
+    # Always ensure mirror is configured (China network)
+    setup_docker_mirror
 
     # Install docker-compose-plugin if compose not available
     if ! docker compose version &>/dev/null && ! command -v docker-compose &>/dev/null; then
