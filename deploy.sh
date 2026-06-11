@@ -232,23 +232,9 @@ check_requirements() {
 
 # ─── 环境配置 ──────────────────────────────────────────────────────────────────
 
-find_available_port() {
-    # Try preferred ports in order, pick first available
-    local ports=(80 8080 3000 9000)
-    for p in "${ports[@]}"; do
-        if ! ss -tlnp 2>/dev/null | grep -q ":${p} " && \
-           ! netstat -tlnp 2>/dev/null | grep -q ":${p} "; then
-            echo "$p"
-            return
-        fi
-    done
-    # All preferred ports taken, find a random available one
-    local p=8100
-    while ss -tlnp 2>/dev/null | grep -q ":${p} " || \
-          netstat -tlnp 2>/dev/null | grep -q ":${p} "; do
-        p=$((p + 1))
-    done
-    echo "$p"
+is_port_used() {
+    ss -tlnp 2>/dev/null | grep -q ":${1} " || \
+    netstat -tlnp 2>/dev/null | grep -q ":${1} "
 }
 
 setup_env() {
@@ -263,12 +249,18 @@ setup_env() {
     local db_password
     db_password=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
 
-    # Find available port (default 3333)
-    local http_port=3333
-    if ss -tlnp 2>/dev/null | grep -q ":3333 " || \
-       netstat -tlnp 2>/dev/null | grep -q ":3333 "; then
-        http_port=$(find_available_port)
-        warn "端口 3333 被占用，自动选择: $http_port"
+    # Find available port starting from 3333, try 3 times
+    local http_port=""
+    for p in 3333 3334 3335; do
+        if ! is_port_used "$p"; then
+            http_port="$p"
+            break
+        fi
+        warn "端口 $p 被占用"
+    done
+    if [ -z "$http_port" ]; then
+        error "端口 3333-3335 均被占用，请手动在 .env 中指定 HTTP_PORT"
+        exit 1
     fi
     info "使用端口: $http_port"
 
